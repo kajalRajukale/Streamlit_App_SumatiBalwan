@@ -1,146 +1,103 @@
 import streamlit as st
 import requests
 import pandas as pd
-import pydeck as pdk
+import folium
+from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Weather Dashboard", page_icon="☀️", layout="centered")
-st.title("🌤️ Weather Dashboard")
+st.set_page_config(page_title="Weather Dashboard", page_icon="🌤️")
+st.title("Weather Dashboard")
 
-st.write("Enter one or more city names separated by commas (e.g. `Pune, Mumbai, Delhi`)")
+st.write("Enter one or more city names (comma separated, e.g., Paris, New York, Pune):")
+city_input = st.text_input("Cities", "Pune")
 
-# --- Input multiple cities ---
-cities_input = st.text_input("Cities", value="Pune, Mumbai, Delhi")
+# Helper: weather code → emoji
+def weather_icon(code):
+    mapping = {
+        0: "☀️ Clear",
+        1: "🌤️ Mostly clear",
+        2: "⛅ Partly cloudy",
+        3: "☁️ Cloudy",
+        45: "🌫️ Fog",
+        48: "🌫️ Fog",
+        51: "🌦️ Drizzle",
+        53: "🌧️ Drizzle",
+        55: "🌧️ Heavy drizzle",
+        61: "🌦️ Light rain",
+        63: "🌧️ Rain",
+        65: "🌧️ Heavy rain",
+        71: "❄️ Snow",
+        73: "❄️ Moderate snow",
+        75: "❄️ Heavy snow",
+        80: "🌦️ Showers",
+        81: "🌧️ Rain showers",
+        82: "⛈️ Thunderstorm",
+        95: "⛈️ Thunderstorm",
+        99: "🌩️ Hail storm",
+    }
+    return mapping.get(code, "🌍 Unknown")
 
-if st.button("Show Weather"):
-    cities = [c.strip() for c in cities_input.split(",") if c.strip()]
-    all_weather = []
+if city_input:
+    cities = [c.strip() for c in city_input.split(",") if c.strip()]
     map_points = []
 
-    # --- Weather code legend ---
-    weather_codes = {
-        0: "☀️ Clear sky",
-        1: "🌤️ Mainly clear",
-        2: "⛅ Partly cloudy",
-        3: "☁️ Overcast",
-        45: "🌫️ Fog",
-        48: "🌫️ Rime fog",
-        51: "🌦️ Drizzle",
-        61: "🌧️ Light rain",
-        71: "❄️ Snow fall",
-        95: "⛈️ Thunderstorm",
-    }
-
     for city in cities:
-        try:
-            # Step 1: Get coordinates
-            geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
-            geo_res = requests.get(geo_url).json()
+        # Geocoding
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
+        geo_res = requests.get(geo_url).json()
 
-            if "results" not in geo_res or len(geo_res["results"]) == 0:
-                st.warning(f"⚠️ City not found: {city}")
-                continue
+        if "results" not in geo_res or len(geo_res["results"]) == 0:
+            st.warning(f"❌ Could not find '{city}'.")
+            continue
 
-            lat = geo_res["results"][0]["latitude"]
-            lon = geo_res["results"][0]["longitude"]
-            city_name = geo_res["results"][0]["name"]
-            country = geo_res["results"][0].get("country", "")
+        lat = geo_res["results"][0]["latitude"]
+        lon = geo_res["results"][0]["longitude"]
+        name = geo_res["results"][0]["name"]
+        country = geo_res["results"][0].get("country", "")
 
-            # Step 2: Get weather
-            url = (
-                f"https://api.open-meteo.com/v1/forecast?"
-                f"latitude={lat}&longitude={lon}"
-                f"&current=temperature_2m,wind_speed_10m,weathercode"
-                f"&timezone=auto"
-            )
-            weather_res = requests.get(url).json()
-            current = weather_res.get("current", {})
+        # Current weather
+        current_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        current = requests.get(current_url).json().get("current_weather", {})
 
-            code = current.get("weathercode", 0)
-            condition = weather_codes.get(code, "Unknown")
-            emoji = condition.split(" ")[0] if condition != "Unknown" else "❓"
-
-            # Save for table + map
-            all_weather.append({
-                "City": city_name,
-                "Country": country,
-                "Temp (°C)": current.get("temperature_2m"),
-                "Wind (km/h)": current.get("wind_speed_10m"),
-                "Condition": condition
-            })
-
-            map_points.append({
-                "lat": lat,
-                "lon": lon,
-                "icon": emoji,
-                "label": f"{city_name}: {condition}"
-            })
-
-        except Exception as e:
-            st.error(f"❌ Error loading {city}: {e}")
-
-    # --- If we have data ---
-    if all_weather:
-        st.subheader("📊 Summary of Cities")
-        st.dataframe(pd.DataFrame(all_weather))
-
-        # --- 🗺️ Map with Icons ---
-        st.subheader("🗺️ City Weather Map")
-
-        map_df = pd.DataFrame(map_points)
-
-        icon_layer = pdk.Layer(
-            "TextLayer",
-            data=map_df,
-            get_position='[lon, lat]',
-            get_text="icon",
-            get_color=[255, 165, 0],
-            get_size=32,
-            size_scale=1.5,
-        )
-
-        label_layer = pdk.Layer(
-            "TextLayer",
-            data=map_df,
-            get_position='[lon, lat]',
-            get_text="label",
-            get_color=[0, 0, 0],
-            get_size=16,
-            size_scale=1.0,
-            get_alignment_baseline="'bottom'"
-        )
-
-        view_state = pdk.ViewState(latitude=20.59, longitude=78.96, zoom=4, pitch=0)
-        st.pydeck_chart(pdk.Deck(layers=[icon_layer, label_layer], initial_view_state=view_state))
-
-        # --- Select one city for detailed 2-week forecast ---
-        st.subheader("📅 Detailed Forecast (Select a City)")
-        selected_city = st.selectbox("Choose a city", [c["City"] for c in all_weather])
-
-        # Find lat/lon again for that city
-        for p in map_points:
-            if p["label"].startswith(selected_city):
-                lat, lon = p["lat"], p["lon"]
-                break
-
+        # Forecast (14 days)
         forecast_url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}"
-            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunshine_duration"
-            f"&timezone=auto&forecast_days=14"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode"
+            f"&forecast_days=14&timezone=auto"
         )
-        forecast_res = requests.get(forecast_url).json()
+        forecast = requests.get(forecast_url).json().get("daily", {})
 
-        daily = forecast_res.get("daily", {})
-        df = pd.DataFrame({
-            "Date": daily["time"],
-            "Max Temp (°C)": daily["temperature_2m_max"],
-            "Min Temp (°C)": daily["temperature_2m_min"],
-            "Rain (mm)": daily["precipitation_sum"],
-            "Sunshine (s)": daily["sunshine_duration"]
-        })
+        # --- Show data ---
+        st.subheader(f"📍 {name}, {country}")
+        if current:
+            st.metric("Current Temperature (°C)", current.get("temperature", "N/A"))
+            st.metric("Wind Speed (km/h)", current.get("windspeed", "N/A"))
 
-        st.dataframe(df.style.format({"Sunshine (s)": "{:.0f}"}))
-        st.line_chart(df.set_index("Date")[["Max Temp (°C)", "Min Temp (°C)"]])
-        st.bar_chart(df.set_index("Date")[["Rain (mm)"]])
+        if forecast:
+            df = pd.DataFrame(forecast)
+            df["icon"] = df["weathercode"].apply(weather_icon)
 
-st.info("Data from [Open-Meteo API](https://open-meteo.com) — Free & No API key required.")
+            st.markdown("### 🌤️ 14-Day Forecast")
+            for i, row in df.iterrows():
+                st.write(
+                    f"**{row['time']}** — {row['icon']} | 🌡️ {row['temperature_2m_min']}–{row['temperature_2m_max']} °C | ☔ {row['precipitation_sum']} mm"
+                )
+
+        map_points.append({"city": name, "lat": lat, "lon": lon})
+
+    # --- 🌎 Create map like Google Maps ---
+    if map_points:
+        avg_lat = sum([p["lat"] for p in map_points]) / len(map_points)
+        avg_lon = sum([p["lon"] for p in map_points]) / len(map_points)
+
+        m = folium.Map(location=[avg_lat, avg_lon], zoom_start=2)
+
+        for p in map_points:
+            folium.Marker(
+                location=[p["lat"], p["lon"]],
+                popup=f"<b>{p['city']}</b>",
+                icon=folium.Icon(color="blue", icon="cloud"),
+            ).add_to(m)
+
+        st.write("### 🗺️ City Locations on Map")
+        st_folium(m, width=700, height=500)
