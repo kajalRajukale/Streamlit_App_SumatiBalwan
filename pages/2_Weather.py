@@ -1,65 +1,136 @@
 import streamlit as st
 import requests
 import pandas as pd
+import pydeck as pdk
 
-st.set_page_config(page_title="City Weather Dashboard 🌦️", page_icon="☀️", layout="centered")
-st.title("🌍 City Weather Dashboard (Open-Meteo API)")
+st.set_page_config(page_title="Weather Dashboard", page_icon="☀️", layout="centered")
+st.title("🌤️ Weather Dashboard")
 
-# --- City Input ---
-city = st.text_input("Enter City Name", value="Pune")
+st.write("Enter one or more city names separated by commas (e.g. `Pune, Mumbai, Delhi`)")
+
+# --- Input multiple cities ---
+cities_input = st.text_input("Cities", value="Pune, Mumbai, Delhi")
 
 if st.button("Show Weather"):
-    # --- Step 1: Get coordinates using Open-Meteo Geocoding API ---
-    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
-    geo_res = requests.get(geo_url).json()
+    cities = [c.strip() for c in cities_input.split(",") if c.strip()]
+    all_weather = []
+    map_points = []
 
-    if "results" not in geo_res or len(geo_res["results"]) == 0:
-        st.error("❌ City not found. Please try another name.")
-    else:
-        lat = geo_res["results"][0]["latitude"]
-        lon = geo_res["results"][0]["longitude"]
-        city_name = geo_res["results"][0]["name"]
-        country = geo_res["results"][0].get("country", "")
+    # --- Weather code legend ---
+    weather_codes = {
+        0: "☀️ Clear sky",
+        1: "🌤️ Mainly clear",
+        2: "⛅ Partly cloudy",
+        3: "☁️ Overcast",
+        45: "🌫️ Fog",
+        48: "🌫️ Rime fog",
+        51: "🌦️ Drizzle",
+        61: "🌧️ Light rain",
+        71: "❄️ Snow fall",
+        95: "⛈️ Thunderstorm",
+    }
 
-        st.success(f"📍 Location found: {city_name}, {country} (Lat: {lat}, Lon: {lon})")
+    for city in cities:
+        try:
+            # Step 1: Get coordinates
+            geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
+            geo_res = requests.get(geo_url).json()
 
-        # --- Step 2: Get weather forecast using Open-Meteo Forecast API ---
-        url = (
+            if "results" not in geo_res or len(geo_res["results"]) == 0:
+                st.warning(f"⚠️ City not found: {city}")
+                continue
+
+            lat = geo_res["results"][0]["latitude"]
+            lon = geo_res["results"][0]["longitude"]
+            city_name = geo_res["results"][0]["name"]
+            country = geo_res["results"][0].get("country", "")
+
+            # Step 2: Get weather
+            url = (
+                f"https://api.open-meteo.com/v1/forecast?"
+                f"latitude={lat}&longitude={lon}"
+                f"&current=temperature_2m,wind_speed_10m,weathercode"
+                f"&timezone=auto"
+            )
+            weather_res = requests.get(url).json()
+            current = weather_res.get("current", {})
+
+            code = current.get("weathercode", 0)
+            condition = weather_codes.get(code, "Unknown")
+            emoji = condition.split(" ")[0] if condition != "Unknown" else "❓"
+
+            # Save for table + map
+            all_weather.append({
+                "City": city_name,
+                "Country": country,
+                "Temp (°C)": current.get("temperature_2m"),
+                "Wind (km/h)": current.get("wind_speed_10m"),
+                "Condition": condition
+            })
+
+            map_points.append({
+                "lat": lat,
+                "lon": lon,
+                "icon": emoji,
+                "label": f"{city_name}: {condition}"
+            })
+
+        except Exception as e:
+            st.error(f"❌ Error loading {city}: {e}")
+
+    # --- If we have data ---
+    if all_weather:
+        st.subheader("📊 Summary of Cities")
+        st.dataframe(pd.DataFrame(all_weather))
+
+        # --- 🗺️ Map with Icons ---
+        st.subheader("🗺️ City Weather Map")
+
+        map_df = pd.DataFrame(map_points)
+
+        icon_layer = pdk.Layer(
+            "TextLayer",
+            data=map_df,
+            get_position='[lon, lat]',
+            get_text="icon",
+            get_color=[255, 165, 0],
+            get_size=32,
+            size_scale=1.5,
+        )
+
+        label_layer = pdk.Layer(
+            "TextLayer",
+            data=map_df,
+            get_position='[lon, lat]',
+            get_text="label",
+            get_color=[0, 0, 0],
+            get_size=16,
+            size_scale=1.0,
+            get_alignment_baseline="'bottom'"
+        )
+
+        view_state = pdk.ViewState(latitude=20.59, longitude=78.96, zoom=4, pitch=0)
+        st.pydeck_chart(pdk.Deck(layers=[icon_layer, label_layer], initial_view_state=view_state))
+
+        # --- Select one city for detailed 2-week forecast ---
+        st.subheader("📅 Detailed Forecast (Select a City)")
+        selected_city = st.selectbox("Choose a city", [c["City"] for c in all_weather])
+
+        # Find lat/lon again for that city
+        for p in map_points:
+            if p["label"].startswith(selected_city):
+                lat, lon = p["lat"], p["lon"]
+                break
+
+        forecast_url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}"
-            f"&current=temperature_2m,wind_speed_10m,weathercode"
             f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunshine_duration"
             f"&timezone=auto&forecast_days=14"
         )
+        forecast_res = requests.get(forecast_url).json()
 
-        weather_res = requests.get(url).json()
-
-        # --- Current Weather ---
-        current = weather_res.get("current", {})
-        st.subheader("🌦️ Current Weather")
-        st.metric("Temperature (°C)", current.get("temperature_2m"))
-        st.metric("Wind Speed (km/h)", current.get("wind_speed_10m"))
-
-        # Optional: weather description
-        weather_codes = {
-            0: "☀️ Clear sky",
-            1: "🌤️ Mainly clear",
-            2: "⛅ Partly cloudy",
-            3: "☁️ Overcast",
-            45: "🌫️ Fog",
-            48: "🌫️ Depositing rime fog",
-            51: "🌦️ Light drizzle",
-            61: "🌧️ Light rain",
-            71: "❄️ Snow fall",
-            95: "⛈️ Thunderstorm",
-        }
-        code = current.get("weathercode", 0)
-        st.write("Condition:", weather_codes.get(code, "Unknown"))
-
-        # --- 2-Week Forecast ---
-        st.subheader("📅 2-Week Forecast")
-
-        daily = weather_res.get("daily", {})
+        daily = forecast_res.get("daily", {})
         df = pd.DataFrame({
             "Date": daily["time"],
             "Max Temp (°C)": daily["temperature_2m_max"],
@@ -69,8 +140,6 @@ if st.button("Show Weather"):
         })
 
         st.dataframe(df.style.format({"Sunshine (s)": "{:.0f}"}))
-
-        # --- Charts ---
         st.line_chart(df.set_index("Date")[["Max Temp (°C)", "Min Temp (°C)"]])
         st.bar_chart(df.set_index("Date")[["Rain (mm)"]])
 
