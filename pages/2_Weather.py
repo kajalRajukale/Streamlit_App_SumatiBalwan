@@ -1,73 +1,77 @@
-# pages/2_Weather.py
 import streamlit as st
 import requests
-import geocoder
+import pandas as pd
 
-# ------------------------------
-# ☀️ WEATHER PAGE - Auto + Search weather info
-# ------------------------------
+st.set_page_config(page_title="City Weather Dashboard 🌦️", page_icon="☀️", layout="centered")
+st.title("🌍 City Weather Dashboard (Open-Meteo API)")
 
-st.set_page_config(page_title="Weather", page_icon="☀️", layout="centered")
+# --- City Input ---
+city = st.text_input("Enter City Name", value="Pune")
 
-st.title("☀️ Live Weather Info")
-st.markdown("Get current weather for your city 🌍")
+if st.button("Show Weather"):
+    # --- Step 1: Get coordinates using Open-Meteo Geocoding API ---
+    geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
+    geo_res = requests.get(geo_url).json()
 
-# --------- OpenWeatherMap Setup ---------
-# You can get a free API key from: https://openweathermap.org/api
-API_KEY = "YOUR_OPENWEATHERMAP_API_KEY"  # Replace or leave blank for demo
-BASE_URL = "https://api.openweathermap.org/data/2.5/weather"
-
-# --------- Auto-detect user's city ---------
-st.subheader("📍 Auto-detected Location")
-try:
-    g = geocoder.ip('me')
-    city = g.city or "Pune"  # fallback demo city
-    st.write(f"Detected city: **{city}**")
-except Exception:
-    city = "Pune"
-    st.write("Could not detect location, showing Pune 🌆")
-
-# --------- Function to fetch weather ---------
-def get_weather(city_name):
-    if not API_KEY:
-        # Mock demo (for no API)
-        return {
-            "city": city_name,
-            "temp": 29,
-            "desc": "Clear Sky (Demo)",
-        }
-    try:
-        params = {"q": city_name, "appid": API_KEY, "units": "metric"}
-        res = requests.get(BASE_URL, params=params)
-        data = res.json()
-        if data.get("cod") != 200:
-            return None
-        return {
-            "city": data["name"],
-            "temp": data["main"]["temp"],
-            "desc": data["weather"][0]["description"].title(),
-        }
-    except Exception:
-        return None
-
-# --------- Display auto location weather ---------
-weather_data = get_weather(city)
-if weather_data:
-    st.metric("🌡️ Temperature", f"{weather_data['temp']} °C")
-    st.write(f"🌤️ Condition: **{weather_data['desc']}**")
-else:
-    st.error("Could not fetch weather data.")
-
-st.divider()
-
-# --------- Search for another city ---------
-st.subheader("🔍 Search another city")
-user_city = st.text_input("Enter city name", placeholder="e.g., Mumbai")
-if st.button("Search Weather"):
-    user_weather = get_weather(user_city)
-    if user_weather:
-        st.success(f"**Weather in {user_weather['city']}**")
-        st.metric("Temperature", f"{user_weather['temp']} °C")
-        st.write(f"Condition: **{user_weather['desc']}**")
+    if "results" not in geo_res or len(geo_res["results"]) == 0:
+        st.error("❌ City not found. Please try another name.")
     else:
-        st.error("City not found. Try again!")
+        lat = geo_res["results"][0]["latitude"]
+        lon = geo_res["results"][0]["longitude"]
+        city_name = geo_res["results"][0]["name"]
+        country = geo_res["results"][0].get("country", "")
+
+        st.success(f"📍 Location found: {city_name}, {country} (Lat: {lat}, Lon: {lon})")
+
+        # --- Step 2: Get weather forecast using Open-Meteo Forecast API ---
+        url = (
+            f"https://api.open-meteo.com/v1/forecast?"
+            f"latitude={lat}&longitude={lon}"
+            f"&current=temperature_2m,wind_speed_10m,weathercode"
+            f"&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,sunshine_duration"
+            f"&timezone=auto&forecast_days=14"
+        )
+
+        weather_res = requests.get(url).json()
+
+        # --- Current Weather ---
+        current = weather_res.get("current", {})
+        st.subheader("🌦️ Current Weather")
+        st.metric("Temperature (°C)", current.get("temperature_2m"))
+        st.metric("Wind Speed (km/h)", current.get("wind_speed_10m"))
+
+        # Optional: weather description
+        weather_codes = {
+            0: "☀️ Clear sky",
+            1: "🌤️ Mainly clear",
+            2: "⛅ Partly cloudy",
+            3: "☁️ Overcast",
+            45: "🌫️ Fog",
+            48: "🌫️ Depositing rime fog",
+            51: "🌦️ Light drizzle",
+            61: "🌧️ Light rain",
+            71: "❄️ Snow fall",
+            95: "⛈️ Thunderstorm",
+        }
+        code = current.get("weathercode", 0)
+        st.write("Condition:", weather_codes.get(code, "Unknown"))
+
+        # --- 2-Week Forecast ---
+        st.subheader("📅 2-Week Forecast")
+
+        daily = weather_res.get("daily", {})
+        df = pd.DataFrame({
+            "Date": daily["time"],
+            "Max Temp (°C)": daily["temperature_2m_max"],
+            "Min Temp (°C)": daily["temperature_2m_min"],
+            "Rain (mm)": daily["precipitation_sum"],
+            "Sunshine (s)": daily["sunshine_duration"]
+        })
+
+        st.dataframe(df.style.format({"Sunshine (s)": "{:.0f}"}))
+
+        # --- Charts ---
+        st.line_chart(df.set_index("Date")[["Max Temp (°C)", "Min Temp (°C)"]])
+        st.bar_chart(df.set_index("Date")[["Rain (mm)"]])
+
+st.info("Data from [Open-Meteo API](https://open-meteo.com) — Free & No API key required.")
