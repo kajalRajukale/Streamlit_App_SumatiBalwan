@@ -10,38 +10,38 @@ st.title("Weather Dashboard")
 st.write("Enter one or more city names (comma separated, e.g., Paris, New York, Pune):")
 city_input = st.text_input("Cities", "Pune")
 
-# Helper: weather code → emoji
+# Helper: map Open-Meteo weather codes → emoji
 def weather_icon(code):
     mapping = {
-        0: "☀️ Clear",
-        1: "🌤️ Mostly clear",
-        2: "⛅ Partly cloudy",
-        3: "☁️ Cloudy",
-        45: "🌫️ Fog",
-        48: "🌫️ Fog",
-        51: "🌦️ Drizzle",
-        53: "🌧️ Drizzle",
-        55: "🌧️ Heavy drizzle",
-        61: "🌦️ Light rain",
-        63: "🌧️ Rain",
-        65: "🌧️ Heavy rain",
-        71: "❄️ Snow",
-        73: "❄️ Moderate snow",
-        75: "❄️ Heavy snow",
-        80: "🌦️ Showers",
-        81: "🌧️ Rain showers",
-        82: "⛈️ Thunderstorm",
-        95: "⛈️ Thunderstorm",
-        99: "🌩️ Hail storm",
+        0: "☀️",
+        1: "🌤️",
+        2: "⛅",
+        3: "☁️",
+        45: "🌫️",
+        48: "🌫️",
+        51: "🌦️",
+        53: "🌧️",
+        55: "🌧️",
+        61: "🌦️",
+        63: "🌧️",
+        65: "🌧️",
+        71: "❄️",
+        73: "❄️",
+        75: "❄️",
+        80: "🌦️",
+        81: "🌧️",
+        82: "⛈️",
+        95: "⛈️",
+        99: "🌩️",
     }
-    return mapping.get(code, "🌍 Unknown")
+    return mapping.get(code, "🌍")
 
 if city_input:
     cities = [c.strip() for c in city_input.split(",") if c.strip()]
     map_points = []
 
     for city in cities:
-        # Geocoding
+        # --- Geocoding ---
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
         geo_res = requests.get(geo_url).json()
 
@@ -54,11 +54,13 @@ if city_input:
         name = geo_res["results"][0]["name"]
         country = geo_res["results"][0].get("country", "")
 
-        # Current weather
+        # --- Current weather ---
         current_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
         current = requests.get(current_url).json().get("current_weather", {})
 
-        # Forecast (14 days)
+        emoji = weather_icon(current.get("weathercode", 0))
+
+        # --- 2-week forecast ---
         forecast_url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}"
@@ -67,8 +69,8 @@ if city_input:
         )
         forecast = requests.get(forecast_url).json().get("daily", {})
 
-        # --- Show data ---
-        st.subheader(f"📍 {name}, {country}")
+        # --- Display city info ---
+        st.subheader(f"📍 {name}, {country} {emoji}")
         if current:
             st.metric("Current Temperature (°C)", current.get("temperature", "N/A"))
             st.metric("Wind Speed (km/h)", current.get("windspeed", "N/A"))
@@ -80,12 +82,18 @@ if city_input:
             st.markdown("### 🌤️ 14-Day Forecast")
             for i, row in df.iterrows():
                 st.write(
-                    f"**{row['time']}** — {row['icon']} | 🌡️ {row['temperature_2m_min']}–{row['temperature_2m_max']} °C | ☔ {row['precipitation_sum']} mm"
+                    f"**{row['time']}** — {row['icon']}  | 🌡️ {row['temperature_2m_min']}–{row['temperature_2m_max']} °C | ☔ {row['precipitation_sum']} mm"
                 )
 
-        map_points.append({"city": name, "lat": lat, "lon": lon})
+        # --- Map marker ---
+        map_points.append({
+            "city": name,
+            "lat": lat,
+            "lon": lon,
+            "emoji": emoji
+        })
 
-    # --- 🌎 Create map like Google Maps ---
+    # --- 🌎 Map ---
     if map_points:
         avg_lat = sum([p["lat"] for p in map_points]) / len(map_points)
         avg_lon = sum([p["lon"] for p in map_points]) / len(map_points)
@@ -95,9 +103,10 @@ if city_input:
         for p in map_points:
             folium.Marker(
                 location=[p["lat"], p["lon"]],
-                popup=f"<b>{p['city']}</b>",
-                icon=folium.Icon(color="blue", icon="cloud"),
+                icon=folium.DivIcon(
+                    html=f"""<div style="font-size:32px;">{p['emoji']} {p['city']}</div>"""
+                )
             ).add_to(m)
 
-        st.write("### 🗺️ City Locations on Map")
+        st.write("### 🗺️ City Locations with Weather")
         st_folium(m, width=700, height=500)
