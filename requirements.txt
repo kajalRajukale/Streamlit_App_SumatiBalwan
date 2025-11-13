@@ -1,7 +1,7 @@
 streamlit
+pandas
 requests
 geocoder
 folium
-streamlit_folium 
-pip install streamlit meteostat geopy pyttsx3 folium streamlit-folium pandas
-
+streamlit-folium
+geopy
