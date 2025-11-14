@@ -1,9 +1,8 @@
 streamlit
-pandas
 requests
-geocoder
+pandas
+geopy
 folium
 streamlit-folium
-geopy
-gTTS
-gTTS
+matplotlib
+matplotlib
