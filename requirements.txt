@@ -5,3 +5,4 @@ geocoder
 folium
 streamlit-folium
 geopy
+gTTS
