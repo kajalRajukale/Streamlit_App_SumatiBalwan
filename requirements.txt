@@ -5,5 +5,3 @@ geopy
 folium
 streamlit-folium
 matplotlib
-matplotlib
-matplotlib
